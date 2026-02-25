@@ -1,0 +1,33 @@
+{
+  "run_id": "791BB74C",
+  "timestamp": "2026-02-23T15:07:22.526386Z",
+  "intent": "rescore",
+  "customer_id_masked": "**********TE",
+  "terminal_status": "NEED_INFO",
+  "route_taken": "missing_data",
+  "node_path": [
+    "intake",
+    "pii_middleware",
+    "moderation_middleware",
+    "scoring",
+    "router",
+    "output"
+  ],
+  "risk_score": 0.0,
+  "risk_tier": "UNKNOWN",
+  "pii_fields_redacted": [
+    "customer_id"
+  ],
+  "moderation_passed": true,
+  "moderation_reason": "Passed heuristic moderation.",
+  "missing_fields": [
+    "avg_txn_amount",
+    "high_risk_country"
+  ],
+  "hitl_triggered": false,
+  "hitl_reviewer_action": null,
+  "hitl_reviewer_notes": null,
+  "tool_call_count": 1,
+  "model_call_count": 0,
+  "errors": []
+}

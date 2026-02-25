@@ -1,0 +1,31 @@
+{
+  "run_id": "7C709BB3",
+  "timestamp": "2026-02-25T13:20:38.621749Z",
+  "intent": "rescore",
+  "customer_id_masked": "****08",
+  "terminal_status": "ESCALATE",
+  "route_taken": "critical_risk_auto_escalate",
+  "node_path": [
+    "intake",
+    "pii_middleware",
+    "moderation_middleware",
+    "scoring",
+    "router",
+    "hitl",
+    "output"
+  ],
+  "risk_score": 58.17,
+  "risk_tier": "CRITICAL",
+  "pii_fields_redacted": [
+    "customer_id"
+  ],
+  "moderation_passed": true,
+  "moderation_reason": "Passed heuristic moderation.",
+  "missing_fields": [],
+  "hitl_triggered": true,
+  "hitl_reviewer_action": "approve",
+  "hitl_reviewer_notes": "Auto-approved (non-interactive mode)",
+  "tool_call_count": 1,
+  "model_call_count": 0,
+  "errors": []
+}
