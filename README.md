@@ -25,8 +25,7 @@
 This project elevates an existing Excel-to-Python customer risk scoring model
 into a **governed, auditable compliance workflow** orchestrated by LangGraph.
 
-The system processes three types of compliance requests (mapped to the
-professor's required intents), applies a middleware safety stack, produces
+The system processes three types of compliance requests, applies a middleware safety stack, produces
 an explainability report at the point of human review, and emits a structured
 audit log on every run.
 
