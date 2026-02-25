@@ -740,6 +740,6 @@ Every run produces:
    dataclass state schemas. This implementation uses a dataclass for type
    safety and IDE autocompletion. The graph compilation is equivalent either way.
 
-###Limitations:
+###11. Limitations:
 Scalability & Production Scope
 This system is designed as a governed compliance workflow prototype. It processes one customer record per CLI invocation and is not architected for concurrent or high-volume transaction throughput. A production deployment would require a message queue or streaming ingestion layer, a persistent case management database, and horizontal scaling support. These are intentional scope boundaries for an academic project, not oversights.
