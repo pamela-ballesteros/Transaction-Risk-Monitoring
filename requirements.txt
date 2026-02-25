@@ -1,0 +1,19 @@
+# Core orchestration
+langgraph>=0.2.0
+langchain-core>=0.2.0
+
+# LLM provider (OpenAI for moderation API; swap for Anthropic if preferred)
+openai>=1.30.0
+
+# Data handling
+pandas>=2.0.0
+openpyxl>=3.1.0        # Excel reading for the upstream scoring model
+
+# Utilities
+python-dotenv>=1.0.0
+colorama>=0.4.6        # optional: colored terminal output
+streamlit>=1.39.0      # UI app
+
+# Development / Testing
+pytest>=8.0.0
+pytest-cov>=5.0.0

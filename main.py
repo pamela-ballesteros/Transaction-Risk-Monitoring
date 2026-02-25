@@ -1,0 +1,327 @@
+#!/usr/bin/env python3
+"""
+main.py
+=======
+CLI Entry Point — MBAN 5510 Final Project
+Customer Risk Scoring: Governed, Auditable Workflow
+
+Usage
+-----
+  # Run interactively (HITL prompts appear on ESCALATE)
+  python main.py --intent rescore --customer-id CUST-20241107-7842
+
+  # Run with inline JSON payload
+  python main.py --payload '{"intent":"rescore","customer_id":"CUST-001","customer_features":{...}}'
+
+  # Run a named scenario from data/sample_customers.json
+  python main.py --scenario low_risk
+  python main.py --scenario high_risk
+  python main.py --scenario critical_risk
+  python main.py --scenario missing_data
+  python main.py --scenario suppress_flag
+
+  # Auto-approve HITL (for CI / demo recording)
+  python main.py --scenario high_risk --auto-approve
+
+  # Save logs to a custom directory
+  python main.py --scenario critical_risk --log-dir ./my_logs
+
+  # List available scenarios
+  python main.py --list-scenarios
+"""
+
+import argparse
+import json
+import sys
+import os
+
+# Ensure project root is on path
+sys.path.insert(0, os.path.dirname(__file__))
+
+from graph.state import RiskWorkflowState
+from graph.workflow import build_workflow
+
+
+# ── Scenarios — all 20 customers from customer_risk_scoring.xlsx ──────────────
+#
+# Feature schema (mirrors Excel columns B, C, D):
+#   txn_count         : number of transactions in the period
+#   avg_txn_amount    : average transaction amount (CAD)
+#   high_risk_country : 1 = high-risk jurisdiction, 0 = standard
+#
+# Ground-truth "flagged" labels from column E are noted in comments.
+# All 4 flagged customers (C006, C008, C014, C020) score ≥ 40 → ESCALATE.
+#
+SCENARIOS = {
+
+    # ── Normal paths (READY) ───────────────────────────────────────────────────
+
+    "C002": {   # score ≈ 6.4  | tier: LOW  | flagged: No
+        "intent": "rescore",
+        "customer_id": "C002",
+        "notes": "Routine annual re-score. Low transaction volume, domestic customer.",
+        "customer_features": {"txn_count": 12, "avg_txn_amount": 90,  "high_risk_country": 0},
+    },
+    "C007": {   # score ≈ 4.0  | tier: LOW  | flagged: No
+        "intent": "rescore",
+        "customer_id": "C007",
+        "notes": "New account, minimal activity.",
+        "customer_features": {"txn_count": 8,  "avg_txn_amount": 75,  "high_risk_country": 0},
+    },
+    "C018": {   # score ≈ 0.8  | tier: LOW  | flagged: No
+        "intent": "rescore",
+        "customer_id": "C018",
+        "notes": "Very low activity. Standard re-score.",
+        "customer_features": {"txn_count": 2,  "avg_txn_amount": 100, "high_risk_country": 0},
+    },
+    "C013": {   # score ≈ 28.5 | tier: MEDIUM | flagged: No
+        "intent": "rescore",
+        "customer_id": "C013",
+        "notes": "Moderate transaction volume. No jurisdiction concerns.",
+        "customer_features": {"txn_count": 42, "avg_txn_amount": 650, "high_risk_country": 0},
+    },
+    "C010": {   # score ≈ 22.9 | tier: MEDIUM | flagged: No
+        "intent": "rescore",
+        "customer_id": "C010",
+        "notes": "High frequency but very low transaction amounts.",
+        "customer_features": {"txn_count": 42, "avg_txn_amount": 12,  "high_risk_country": 0},
+    },
+    "C015": {   # score ≈ 20.8 | tier: MEDIUM | flagged: No
+        "intent": "rescore",
+        "customer_id": "C015",
+        "notes": "High-risk country flag but minimal transaction activity.",
+        "customer_features": {"txn_count": 2,  "avg_txn_amount": 100, "high_risk_country": 1},
+    },
+
+    # ── Escalation paths — labeled flagged in Excel (ESCALATE → HITL) ─────────
+
+    "C006": {   # score ≈ 41.8 | tier: HIGH | flagged: YES ✓
+        "intent": "rescore",
+        "customer_id": "C006",
+        "notes": "Flagged by automated monitoring. High-risk jurisdiction with elevated transaction frequency.",
+        "customer_features": {"txn_count": 38, "avg_txn_amount": 150, "high_risk_country": 1},
+    },
+    "C008": {   # score ≈ 46.4 | tier: HIGH | flagged: YES ✓
+        "intent": "rescore",
+        "customer_id": "C008",
+        "notes": "Flagged: moderate-to-high transaction amounts from a high-risk country. EDD recommended.",
+        "customer_features": {"txn_count": 25, "avg_txn_amount": 1500, "high_risk_country": 1},
+    },
+    "C020": {   # score ≈ 47.8 | tier: HIGH | flagged: YES ✓
+        "intent": "rescore",
+        "customer_id": "C020",
+        "notes": "Flagged: high transaction volume from high-risk jurisdiction. Prior SAR filed.",
+        "customer_features": {"txn_count": 47, "avg_txn_amount": 250, "high_risk_country": 1},
+    },
+    "C014": {   # score ≈ 55.9 | tier: CRITICAL | flagged: YES ✓
+        "intent": "rescore",
+        "customer_id": "C014",
+        "notes": "Flagged: highest risk score in dataset. Large transactions from high-risk country. Compliance review required.",
+        "customer_features": {"txn_count": 26, "avg_txn_amount": 2500, "high_risk_country": 1},
+    },
+
+    # ── Borderline / interesting cases ────────────────────────────────────────
+
+    "C001": {   # score ≈ 53.4 | tier: HIGH | flagged: No (but near-flagged)
+        "intent": "rescore",
+        "customer_id": "C001",
+        "notes": "Not flagged in reference data but high-risk country with large average transaction. Monitor closely.",
+        "customer_features": {"txn_count": 6,  "avg_txn_amount": 3500, "high_risk_country": 1},
+    },
+    "C004": {   # score ≈ 53.1 | tier: HIGH | flagged: No (highest avg_txn_amount)
+        "intent": "rescore",
+        "customer_id": "C004",
+        "notes": "Largest average transaction amount in dataset ($4,500). Not flagged — domestic low-frequency account.",
+        "customer_features": {"txn_count": 25, "avg_txn_amount": 4500, "high_risk_country": 0},
+    },
+    "C009": {   # score ≈ 40.2 | tier: HIGH | flagged: No (highest txn_count)
+        "intent": "rescore",
+        "customer_id": "C009",
+        "notes": "Highest transaction frequency in dataset (72 txns). Very low amounts — possible structuring pattern.",
+        "customer_features": {"txn_count": 72, "avg_txn_amount": 34,  "high_risk_country": 0},
+    },
+
+    # ── Intent: suppress_flag (requires HITL if risk ≥ 40) ────────────────────
+
+    "suppress_C006": {  # score ≈ 41.8 | HIGH | flagged YES — suppression escalates
+        "intent": "suppress_flag",
+        "customer_id": "C006",
+        "notes": "Relationship manager requesting flag suppression. Customer disputes classification.",
+        "customer_features": {"txn_count": 38, "avg_txn_amount": 150, "high_risk_country": 1},
+    },
+    "suppress_C013": {  # score ≈ 28.5 | MEDIUM — suppression auto-approved
+        "intent": "suppress_flag",
+        "customer_id": "C013",
+        "notes": "Flag raised in error during system migration. Suppression approved at analyst level.",
+        "customer_features": {"txn_count": 42, "avg_txn_amount": 650, "high_risk_country": 0},
+    },
+
+    # ── Intent: explain_score ──────────────────────────────────────────────────
+
+    "explain_C008": {   # score ≈ 46.4 | HIGH — explain + HITL
+        "intent": "explain_score",
+        "customer_id": "C008",
+        "notes": "Customer C008 has requested a written explanation of their risk classification for dispute purposes.",
+        "customer_features": {"txn_count": 25, "avg_txn_amount": 1500, "high_risk_country": 1},
+    },
+    "explain_C002": {   # score ≈ 6.4  | LOW — explain, auto-READY
+        "intent": "explain_score",
+        "customer_id": "C002",
+        "notes": "Routine explanation request for onboarding documentation.",
+        "customer_features": {"txn_count": 12, "avg_txn_amount": 90,  "high_risk_country": 0},
+    },
+
+    # ── NEED_INFO path — missing fields ───────────────────────────────────────
+
+    "missing_data": {
+        "intent": "rescore",
+        "customer_id": "C-INCOMPLETE",
+        "notes": "Incomplete onboarding. avg_txn_amount and high_risk_country not yet collected.",
+        "customer_features": {
+            "txn_count": 18,
+            # avg_txn_amount and high_risk_country intentionally missing
+        },
+    },
+}
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Customer Risk Scoring — Governed Compliance Workflow",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=__doc__,
+    )
+
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
+        "--scenario", "-s",
+        choices=list(SCENARIOS.keys()),
+        help="Run a pre-built test scenario.",
+    )
+    group.add_argument(
+        "--payload", "-p",
+        type=str,
+        help="Raw JSON payload string.",
+    )
+    group.add_argument(
+        "--payload-file", "-f",
+        type=str,
+        help="Path to a JSON payload file.",
+    )
+
+    parser.add_argument(
+        "--auto-approve",
+        action="store_true",
+        help="Auto-approve HITL review (governed; requires ALLOW_AUTO_HITL=true).",
+    )
+    parser.add_argument(
+    "--output-format",
+    choices=["pretty", "json", "minimal"],
+    default="pretty",
+    help="Output format: pretty (default), json (machine-readable), minimal (status line only).",
+    )
+
+    parser.add_argument(
+        "--log-dir",
+        default="logs",
+        help="Directory to write audit logs (default: ./logs).",
+    )
+    
+    parser.add_argument(
+        "--show-audit",
+        action="store_true",
+        help="Print the audit JSON to stdout after the run completes.",
+    )
+    parser.add_argument(
+        "--list-scenarios",
+        action="store_true",
+        help="List available test scenarios and exit.",
+    )
+
+    return parser.parse_args()
+
+
+def load_payload(args) -> dict:
+    """Load payload from scenario, JSON string, or file."""
+    if args.scenario:
+        return SCENARIOS[args.scenario]
+    elif args.payload:
+        return json.loads(args.payload)
+    elif args.payload_file:
+        with open(args.payload_file) as f:
+            return json.load(f)
+    else:
+        # Interactive mode: prompt for scenario
+        print("No input provided. Available scenarios:")
+        for name in SCENARIOS:
+            print(f"  {name}")
+        choice = input("\nEnter scenario name (or Ctrl+C to exit): ").strip()
+        if choice in SCENARIOS:
+            return SCENARIOS[choice]
+        raise ValueError(f"Unknown scenario: {choice}")
+
+
+def main():
+    args = parse_args()
+    allow_auto_hitl = os.getenv("ALLOW_AUTO_HITL", "").strip().lower() in {"1", "true", "yes"}
+
+    if args.auto_approve and not allow_auto_hitl:
+        print(
+            "[ERROR] --auto-approve blocked by governance policy. "
+            "Set ALLOW_AUTO_HITL=true only in controlled environments.",
+            file=sys.stderr,
+        )
+        return 1
+
+    if args.list_scenarios:
+        print("\nAvailable test scenarios:")
+        print("-" * 50)
+        for name, payload in SCENARIOS.items():
+            intent = payload.get("intent", "?")
+            cid = payload.get("customer_id", "?")
+            print(f"  {name:<20} intent={intent:<14} customer={cid}")
+        print()
+        return 0
+
+    # Load payload
+    try:
+        payload = load_payload(args)
+    except (json.JSONDecodeError, ValueError, FileNotFoundError) as e:
+        print(f"[ERROR] Failed to load payload: {e}", file=sys.stderr)
+        return 1
+
+    # Print run header
+    print("")
+    print("━" * 70)
+    print("  MBAN 5510 — Customer Risk Scoring: Governed Compliance Workflow")
+    print("━" * 70)
+    print(f"  Intent    : {payload.get('intent', 'unknown')}")
+    print(f"  Customer  : {payload.get('customer_id', 'unknown')}")
+    print(f"  Auto HITL : {'Yes' if args.auto_approve else 'No (interactive)'}")
+    print("━" * 70)
+    print("")
+
+    # Initialize state
+    state = RiskWorkflowState(raw_input=payload)
+
+    # Build and run workflow
+    workflow = build_workflow(
+        auto_approve=args.auto_approve,
+        log_dir=args.log_dir,
+    )
+
+    try:
+        final_state = workflow(state)
+    except Exception as e:
+        print(f"\n[FATAL ERROR] Workflow execution failed: {e}", file=sys.stderr)
+        return 1
+
+    # Return exit code based on terminal status
+    status_codes = {"READY": 0, "NEED_INFO": 2, "ESCALATE": 3}
+    return status_codes.get(
+        getattr(final_state, "terminal_status", None), 1
+    )
+
+
+if __name__ == "__main__":
+    sys.exit(main())
