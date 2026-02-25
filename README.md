@@ -17,6 +17,7 @@
 8. [Running Tests](#8-running-tests)
 9. [Project-to-Brief Mapping](#9-project-to-brief-mapping)
 10. [Assumptions](#10-assumptions)
+11. [Limitations](#11-limitations)
 
 ---
 
