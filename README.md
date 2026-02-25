@@ -1,7 +1,7 @@
 # Customer Risk Scoring — Governed, Auditable Compliance Workflow
 ### MBAN 5510 Final Project | Saint Mary's University Sobey School of Business
 
-> **LinkedIn Demo:** *(insert link after recording)*  
+> **LinkedIn Demo:** (https://www.linkedin.com/feed/update/urn:li:activity:7432517664650182656/)
 > **GitHub:** `pamela-ballesteros/customer-risk-scoring-langgraph`
 
 ---
